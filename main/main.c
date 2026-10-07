@@ -114,22 +114,65 @@ static void wifi_init(void)
 static esp_err_t index_handler(httpd_req_t *req)
 {
     const char *html =
-        "<!DOCTYPE html>"
-        "<html>"
-        "<head>"
-        "<title>ESP32-S3 OTA</title>"
-        "</head>"
-        "<body>"
-        "<h1>ESP32-S3 OTA Update</h1>"
-        "<form method=\"POST\" "
-        "action=\"/update\" "
-        "enctype=\"application/octet-stream\">"
-        "<input type=\"file\" name=\"firmware\">"
-        "<br><br>"
-        "<input type=\"submit\" value=\"Upload Firmware\">"
-        "</form>"
-        "</body>"
-        "</html>";
+    "<!DOCTYPE html>"
+    "<html>"
+    "<head>"
+    "<meta charset=\"UTF-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+    "<title>ESP32-S3 OTA</title>"
+    "</head>"
+    "<body>"
+    "<h1>ESP32-S3 OTA Update</h1>"
+
+    "<input type=\"file\" id=\"firmware\" accept=\".bin\">"
+    "<br><br>"
+    "<button onclick=\"uploadFirmware()\">Upload Firmware</button>"
+
+    "<p id=\"status\"></p>"
+
+    "<script>"
+    "async function uploadFirmware() {"
+        "const fileInput = document.getElementById('firmware');"
+        "const status = document.getElementById('status');"
+
+        "if (!fileInput.files.length) {"
+            "status.textContent = 'Please select a firmware file.';"
+            "return;"
+        "}"
+
+        "const file = fileInput.files[0];"
+
+        "if (!file.name.endsWith('.bin')) {"
+            "status.textContent = 'Please select a .bin firmware file.';"
+            "return;"
+        "}"
+
+        "status.textContent = 'Uploading...';"
+
+        "try {"
+            "const response = await fetch('/update', {"
+                "method: 'POST',"
+                "headers: {"
+                    "'Content-Type': 'application/octet-stream'"
+                "},"
+                "body: file"
+            "});"
+
+            "const text = await response.text();"
+
+            "if (response.ok) {"
+                "status.textContent = text;"
+            "} else {"
+                "status.textContent = 'OTA failed: ' + text;"
+            "}"
+        "} catch (error) {"
+            "status.textContent = 'Upload error: ' + error;"
+        "}"
+    "}"
+    "</script>"
+
+    "</body>"
+    "</html>";
 
     httpd_resp_set_type(
         req,
