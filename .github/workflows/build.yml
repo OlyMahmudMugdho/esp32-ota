@@ -25,8 +25,9 @@ jobs:
           echo "ESP-IDF version:"
           idf.py --version
 
-          # Start with a clean configuration
+          # Remove old configuration/build output
           rm -f sdkconfig
+          rm -rf build
 
           # Configure ESP32-S3
           idf.py set-target esp32s3
@@ -41,8 +42,11 @@ jobs:
 
           mkdir -p artifacts/first-flash
 
+          # merge-bin executes from the build directory,
+          # therefore output path must go one level up.
           idf.py merge-bin \
-            -o artifacts/first-flash/esp32s3-n16r8-merged.bin
+            -o ../artifacts/first-flash/esp32s3-n16r8-merged.bin \
+            -f raw
 
       - name: Prepare OTA firmware
         shell: bash
@@ -68,6 +72,12 @@ jobs:
 
           cp build/flash_args \
              artifacts/build/flash_args
+
+      - name: Show generated files
+        shell: bash
+        run: |
+          echo "=== Artifacts ==="
+          find artifacts -type f -printf '%p (%s bytes)\n'
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
