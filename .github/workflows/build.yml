@@ -1,86 +1,49 @@
-name: Build ESP32-S3 N16R8
+name: ESP32-S3 Build
 
 on:
   push:
-    branches:
-      - main
+  pull_request:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    container:
-      image: espressif/idf:latest
-
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: Build firmware
-        shell: bash
+      - name: ESP-IDF build and merge
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.2
+          target: esp32s3
+          path: '.'
+          command: |
+            idf.py build
+            cd build
+            esptool --chip esp32s3 merge-bin \
+              -o esp32s3-n16r8-merged.bin \
+              @flash_args
+
+      - name: Prepare firmware
         run: |
-          . /opt/esp/idf/export.sh
+          mkdir -p firmware/first-flash
+          mkdir -p firmware/ota
 
-          echo "ESP-IDF version:"
-          idf.py --version
-
-          # Remove old configuration/build output
-          rm -f sdkconfig
-          rm -rf build
-
-          # Configure ESP32-S3
-          idf.py set-target esp32s3
-
-          # Build firmware
-          idf.py build
-
-      - name: Create merged first-flash binary
-        shell: bash
-        run: |
-          . /opt/esp/idf/export.sh
-
-          mkdir -p artifacts/first-flash
-
-          # merge-bin executes from the build directory,
-          # therefore output path must go one level up.
-          idf.py merge-bin \
-            -o ../artifacts/first-flash/esp32s3-n16r8-merged.bin \
-            -f raw
-
-      - name: Prepare OTA firmware
-        shell: bash
-        run: |
-          mkdir -p artifacts/ota
+          cp build/esp32s3-n16r8-merged.bin \
+             firmware/first-flash/
 
           cp build/esp32-ota.bin \
-             artifacts/ota/esp32-ota.bin
+             firmware/ota/
 
-      - name: Prepare build files
-        shell: bash
-        run: |
-          mkdir -p artifacts/build
+          echo "Firmware:"
+          find firmware -type f -exec ls -lh {} \;
 
-          cp build/bootloader/bootloader.bin \
-             artifacts/build/bootloader.bin
-
-          cp build/partition_table/partition-table.bin \
-             artifacts/build/partition-table.bin
-
-          cp build/esp32-ota.bin \
-             artifacts/build/esp32-ota.bin
-
-          cp build/flash_args \
-             artifacts/build/flash_args
-
-      - name: Show generated files
-        shell: bash
-        run: |
-          echo "=== Artifacts ==="
-          find artifacts -type f -printf '%p (%s bytes)\n'
-
-      - name: Upload firmware artifacts
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: esp32s3-n16r8-firmware
-          path: artifacts/
+          path: firmware/
