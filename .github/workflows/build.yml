@@ -18,19 +18,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: Build ESP-IDF firmware
         shell: bash
         run: |
           . /opt/esp/idf/export.sh
 
           idf.py set-target esp32s3
-
           idf.py build
 
-      - name: Upload firmware
+      - name: Create merged binary
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+
+          mkdir -p merged
+
+          esptool.py merge_bin \
+            -o merged/merged-flash.bin \
+            --flash_mode dio \
+            --flash_size 16MB \
+            0x0000 build/bootloader/bootloader.bin \
+            0x8000 build/partition_table/partition-table.bin \
+            0x10000 build/esp32-ota.bin
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts/merged
+          mkdir -p artifacts/build
+
+          cp merged/merged-flash.bin artifacts/merged/
+          cp build/esp32-ota.bin artifacts/build/
+          cp build/bootloader/bootloader.bin artifacts/build/
+          cp build/partition_table/partition-table.bin artifacts/build/
+
+      - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: esp32s3-ota-firmware
-          path: |
-            build/*.bin
-            build/partition_table/*.bin
+          name: esp32s3-firmware
+          path: artifacts/
