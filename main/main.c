@@ -152,7 +152,7 @@ static esp_err_t index_handler(httpd_req_t *req)
 
         "<body>"
 
-        "<h1>ESP32-S3 OTA Update</h1>"
+        "<h1>ESP32-S3 OTA Update v1</h1>"
 
         "<input "
         "type=\"file\" "
