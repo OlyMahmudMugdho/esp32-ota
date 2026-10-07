@@ -11,77 +11,66 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    container:
+      image: espressif/idf:v6.1
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: ESP-IDF build and merge
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v6.1
-          target: esp32s3
-          path: '.'
-          command: |
-            echo "ESP-IDF version:"
-            idf.py --version
-
-            echo "Cleaning previous configuration..."
-            rm -f sdkconfig
-            rm -rf build
-
-            echo "Setting target..."
-            idf.py set-target esp32s3
-
-            echo "Building firmware..."
-            idf.py build
-
-            echo "Checking flash/PSRAM configuration..."
-            grep -E 'CONFIG_ESPTOOLPY_(FLASHSIZE|FLASHMODE|FLASHFREQ)|CONFIG_SPIRAM' sdkconfig || true
-
-            echo "Creating merged first-flash binary..."
-            cd build
-            esptool --chip esp32s3 merge-bin \
-              -o esp32s3-n16r8-merged.bin \
-              @flash_args
-
-      - name: Prepare firmware artifacts
+      - name: Build firmware
         shell: bash
         run: |
-          mkdir -p firmware/first-flash
-          mkdir -p firmware/ota
-          mkdir -p firmware/build
+          . /opt/esp/idf/export.sh
 
-          # First-time USB/ESPHome Web flashing
-          cp build/esp32s3-n16r8-merged.bin \
-             firmware/first-flash/esp32s3-n16r8-merged.bin
+          rm -f sdkconfig
+          rm -rf build
 
-          # Subsequent Wi-Fi OTA updates
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Create merged first-flash binary
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+
+          mkdir -p artifacts/first-flash
+
+          cd build
+
+          esptool --chip esp32s3 merge-bin \
+            -o ../artifacts/first-flash/esp32s3-n16r8-merged.bin \
+            @flash_args
+
+      - name: Prepare OTA firmware
+        shell: bash
+        run: |
+          mkdir -p artifacts/ota
+
           cp build/esp32-ota.bin \
-             firmware/ota/esp32-ota.bin
+            artifacts/ota/esp32-ota.bin
 
-          # Individual build files for debugging/manual flashing
+      - name: Prepare build files
+        shell: bash
+        run: |
+          mkdir -p artifacts/build
+
           cp build/bootloader/bootloader.bin \
-             firmware/build/bootloader.bin
+            artifacts/build/bootloader.bin
 
           cp build/partition_table/partition-table.bin \
-             firmware/build/partition-table.bin
+            artifacts/build/partition-table.bin
 
           cp build/esp32-ota.bin \
-             firmware/build/esp32-ota.bin
+            artifacts/build/esp32-ota.bin
 
           cp build/flash_args \
-             firmware/build/flash_args
-
-          echo "======================================"
-          echo "Generated firmware:"
-          echo "======================================"
-
-          find firmware -type f -exec ls -lh {} \;
+            artifacts/build/flash_args
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: esp32s3-n16r8-firmware
-          path: firmware/
+          path: artifacts/
