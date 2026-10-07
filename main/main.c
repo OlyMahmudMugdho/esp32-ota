@@ -387,7 +387,7 @@ static esp_err_t ota_handler(httpd_req_t *req)
      * Allocate OTA buffer from heap
      * -------------------------------------------------------- */
 
-    uint8_t *buffer =
+    char *buffer =
         malloc(OTA_BUFFER_SIZE);
 
     if (buffer == NULL) {
