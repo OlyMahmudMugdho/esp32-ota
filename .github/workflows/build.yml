@@ -1,7 +1,9 @@
-name: ESP32-S3 Build
+name: ESP32-S3 N16R8 Build
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -10,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -18,28 +20,64 @@ jobs:
       - name: ESP-IDF build and merge
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v6.2
+          esp_idf_version: v6.1
           target: esp32s3
           path: '.'
           command: |
+            echo "ESP-IDF version:"
+            idf.py --version
+
+            echo "Cleaning previous configuration..."
+            rm -f sdkconfig
+            rm -rf build
+
+            echo "Setting target..."
+            idf.py set-target esp32s3
+
+            echo "Building firmware..."
             idf.py build
+
+            echo "Checking flash/PSRAM configuration..."
+            grep -E 'CONFIG_ESPTOOLPY_(FLASHSIZE|FLASHMODE|FLASHFREQ)|CONFIG_SPIRAM' sdkconfig || true
+
+            echo "Creating merged first-flash binary..."
             cd build
             esptool --chip esp32s3 merge-bin \
               -o esp32s3-n16r8-merged.bin \
               @flash_args
 
-      - name: Prepare firmware
+      - name: Prepare firmware artifacts
+        shell: bash
         run: |
           mkdir -p firmware/first-flash
           mkdir -p firmware/ota
+          mkdir -p firmware/build
 
+          # First-time USB/ESPHome Web flashing
           cp build/esp32s3-n16r8-merged.bin \
-             firmware/first-flash/
+             firmware/first-flash/esp32s3-n16r8-merged.bin
+
+          # Subsequent Wi-Fi OTA updates
+          cp build/esp32-ota.bin \
+             firmware/ota/esp32-ota.bin
+
+          # Individual build files for debugging/manual flashing
+          cp build/bootloader/bootloader.bin \
+             firmware/build/bootloader.bin
+
+          cp build/partition_table/partition-table.bin \
+             firmware/build/partition-table.bin
 
           cp build/esp32-ota.bin \
-             firmware/ota/
+             firmware/build/esp32-ota.bin
 
-          echo "Firmware:"
+          cp build/flash_args \
+             firmware/build/flash_args
+
+          echo "======================================"
+          echo "Generated firmware:"
+          echo "======================================"
+
           find firmware -type f -exec ls -lh {} \;
 
       - name: Upload firmware
