@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -9,22 +11,32 @@
 #include "esp_event.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
-#include "nvs_flash.h"
-
+#include "esp_err.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
+
+#include "nvs_flash.h"
 
 #define WIFI_SSID       "RANDOM"
 #define WIFI_PASSWORD   "mugdhodzs38"
 
+#define OTA_BUFFER_SIZE 4096
+
 static const char *TAG = "OTA";
+
+
+/* ============================================================
+ * WiFi
+ * ============================================================ */
 
 static void wifi_event_handler(
     void *arg,
     esp_event_base_t event_base,
     int32_t event_id,
     void *event_data
-) {
+)
+{
     if (event_base == WIFI_EVENT &&
         event_id == WIFI_EVENT_STA_START) {
 
@@ -33,7 +45,11 @@ static void wifi_event_handler(
     } else if (event_base == WIFI_EVENT &&
                event_id == WIFI_EVENT_STA_DISCONNECTED) {
 
-        ESP_LOGI(TAG, "WiFi disconnected. Reconnecting...");
+        ESP_LOGI(
+            TAG,
+            "WiFi disconnected. Reconnecting..."
+        );
+
         esp_wifi_connect();
 
     } else if (event_base == IP_EVENT &&
@@ -50,9 +66,12 @@ static void wifi_event_handler(
     }
 }
 
+
 static void wifi_init(void)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(
+        esp_netif_init()
+    );
 
     ESP_ERROR_CHECK(
         esp_event_loop_create_default()
@@ -108,71 +127,114 @@ static void wifi_init(void)
         esp_wifi_start()
     );
 
-    ESP_LOGI(TAG, "WiFi initialization complete");
+    ESP_LOGI(
+        TAG,
+        "WiFi initialization complete"
+    );
 }
+
+
+/* ============================================================
+ * Web UI
+ * ============================================================ */
 
 static esp_err_t index_handler(httpd_req_t *req)
 {
     const char *html =
-    "<!DOCTYPE html>"
-    "<html>"
-    "<head>"
-    "<meta charset=\"UTF-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-    "<title>ESP32-S3 OTA</title>"
-    "</head>"
-    "<body>"
-    "<h1>ESP32-S3 OTA Update</h1>"
+        "<!DOCTYPE html>"
+        "<html>"
+        "<head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" "
+        "content=\"width=device-width, initial-scale=1.0\">"
+        "<title>ESP32-S3 OTA</title>"
+        "</head>"
 
-    "<input type=\"file\" id=\"firmware\" accept=\".bin\">"
-    "<br><br>"
-    "<button onclick=\"uploadFirmware()\">Upload Firmware</button>"
+        "<body>"
 
-    "<p id=\"status\"></p>"
+        "<h1>ESP32-S3 OTA Update</h1>"
 
-    "<script>"
-    "async function uploadFirmware() {"
-        "const fileInput = document.getElementById('firmware');"
-        "const status = document.getElementById('status');"
+        "<input "
+        "type=\"file\" "
+        "id=\"firmware\" "
+        "accept=\".bin\">"
 
-        "if (!fileInput.files.length) {"
-            "status.textContent = 'Please select a firmware file.';"
-            "return;"
-        "}"
+        "<br><br>"
 
-        "const file = fileInput.files[0];"
+        "<button onclick=\"uploadFirmware()\">"
+        "Upload Firmware"
+        "</button>"
 
-        "if (!file.name.endsWith('.bin')) {"
-            "status.textContent = 'Please select a .bin firmware file.';"
-            "return;"
-        "}"
+        "<p id=\"status\"></p>"
 
-        "status.textContent = 'Uploading...';"
+        "<script>"
 
-        "try {"
-            "const response = await fetch('/update', {"
-                "method: 'POST',"
-                "headers: {"
-                    "'Content-Type': 'application/octet-stream'"
-                "},"
-                "body: file"
-            "});"
+        "async function uploadFirmware() {"
 
-            "const text = await response.text();"
+            "const fileInput = "
+            "document.getElementById('firmware');"
 
-            "if (response.ok) {"
-                "status.textContent = text;"
-            "} else {"
-                "status.textContent = 'OTA failed: ' + text;"
+            "const status = "
+            "document.getElementById('status');"
+
+            "if (!fileInput.files.length) {"
+                "status.textContent = "
+                "'Please select a firmware file.';"
+                "return;"
             "}"
-        "} catch (error) {"
-            "status.textContent = 'Upload error: ' + error;"
-        "}"
-    "}"
-    "</script>"
 
-    "</body>"
-    "</html>";
+            "const file = fileInput.files[0];"
+
+            "if (!file.name.toLowerCase().endsWith('.bin')) {"
+                "status.textContent = "
+                "'Please select a .bin firmware file.';"
+                "return;"
+            "}"
+
+            "status.textContent = "
+            "'Uploading firmware...';"
+
+            "try {"
+
+                "const response = await fetch('/update', {"
+
+                    "method: 'POST',"
+
+                    "headers: {"
+                        "'Content-Type': "
+                        "'application/octet-stream'"
+                    "},"
+
+                    "body: file"
+
+                "});"
+
+                "const text = await response.text();"
+
+                "if (response.ok) {"
+
+                    "status.textContent = text;"
+
+                "} else {"
+
+                    "status.textContent = "
+                    "'OTA failed: ' + text;"
+
+                "}"
+
+            "} catch (error) {"
+
+                "status.textContent = "
+                "'Upload error: ' + error;"
+
+            "}"
+
+        "}"
+
+        "</script>"
+
+        "</body>"
+        "</html>";
 
     httpd_resp_set_type(
         req,
@@ -186,9 +248,49 @@ static esp_err_t index_handler(httpd_req_t *req)
     );
 }
 
+
+/* ============================================================
+ * OTA Handler
+ * ============================================================ */
+
 static esp_err_t ota_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Starting OTA update");
+    ESP_LOGI(
+        TAG,
+        "Starting OTA update"
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Content-Length: %d bytes",
+        req->content_len
+    );
+
+
+    /* --------------------------------------------------------
+     * Validate Content-Length
+     * -------------------------------------------------------- */
+
+    if (req->content_len <= 0) {
+
+        ESP_LOGE(
+            TAG,
+            "Invalid Content-Length"
+        );
+
+        httpd_resp_send_err(
+            req,
+            HTTPD_400_BAD_REQUEST,
+            "Invalid firmware size"
+        );
+
+        return ESP_FAIL;
+    }
+
+
+    /* --------------------------------------------------------
+     * Get next OTA partition
+     * -------------------------------------------------------- */
 
     const esp_partition_t *update_partition =
         esp_ota_get_next_update_partition(NULL);
@@ -215,11 +317,51 @@ static esp_err_t ota_handler(httpd_req_t *req)
         update_partition->label
     );
 
+    ESP_LOGI(
+        TAG,
+        "Partition address: 0x%lx",
+        (unsigned long)update_partition->address
+    );
+
+    ESP_LOGI(
+        TAG,
+        "Partition size: %lu bytes",
+        (unsigned long)update_partition->size
+    );
+
+
+    /* --------------------------------------------------------
+     * Check firmware size
+     * -------------------------------------------------------- */
+
+    if ((size_t)req->content_len >
+        update_partition->size) {
+
+        ESP_LOGE(
+            TAG,
+            "Firmware too large: %d bytes",
+            req->content_len
+        );
+
+        httpd_resp_send_err(
+            req,
+            HTTPD_400_BAD_REQUEST,
+            "Firmware is too large"
+        );
+
+        return ESP_FAIL;
+    }
+
+
+    /* --------------------------------------------------------
+     * Start OTA
+     * -------------------------------------------------------- */
+
     esp_ota_handle_t ota_handle = 0;
 
     esp_err_t err = esp_ota_begin(
         update_partition,
-        OTA_SIZE_UNKNOWN,
+        req->content_len,
         &ota_handle
     );
 
@@ -240,26 +382,139 @@ static esp_err_t ota_handler(httpd_req_t *req)
         return err;
     }
 
-    char buffer[4096];
 
-    int received;
-    int total = 0;
+    /* --------------------------------------------------------
+     * Allocate OTA buffer from heap
+     * -------------------------------------------------------- */
 
-    while (1) {
+    uint8_t *buffer =
+        malloc(OTA_BUFFER_SIZE);
 
-        received = httpd_req_recv(
-            req,
-            buffer,
-            sizeof(buffer)
+    if (buffer == NULL) {
+
+        ESP_LOGE(
+            TAG,
+            "Failed to allocate OTA buffer"
         );
 
+        esp_ota_abort(
+            ota_handle
+        );
+
+        httpd_resp_send_err(
+            req,
+            HTTPD_500_INTERNAL_SERVER_ERROR,
+            "Out of memory"
+        );
+
+        return ESP_ERR_NO_MEM;
+    }
+
+
+    /* --------------------------------------------------------
+     * Receive and write firmware
+     * -------------------------------------------------------- */
+
+    int total_received = 0;
+
+    bool first_chunk = true;
+
+    while (total_received < req->content_len) {
+
+        int remaining =
+            req->content_len - total_received;
+
+        int to_receive =
+            remaining > OTA_BUFFER_SIZE
+                ? OTA_BUFFER_SIZE
+                : remaining;
+
+
+        int received = httpd_req_recv(
+            req,
+            buffer,
+            to_receive
+        );
+
+
+        /* Timeout is recoverable */
+
         if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+
             continue;
         }
 
+
+        /* Connection error */
+
         if (received <= 0) {
-            break;
+
+            ESP_LOGE(
+                TAG,
+                "Firmware receive failed: %d",
+                received
+            );
+
+            free(buffer);
+
+            esp_ota_abort(
+                ota_handle
+            );
+
+            httpd_resp_send_err(
+                req,
+                HTTPD_500_INTERNAL_SERVER_ERROR,
+                "Firmware upload interrupted"
+            );
+
+            return ESP_FAIL;
         }
+
+
+        /* ----------------------------------------------------
+         * Validate ESP32 application magic byte
+         *
+         * ESP32 application images start with 0xE9.
+         * ---------------------------------------------------- */
+
+        if (first_chunk) {
+
+            first_chunk = false;
+
+            ESP_LOGI(
+                TAG,
+                "Firmware magic: 0x%02X",
+                buffer[0]
+            );
+
+            if (buffer[0] != 0xE9) {
+
+                ESP_LOGE(
+                    TAG,
+                    "Invalid firmware magic: 0x%02X",
+                    buffer[0]
+                );
+
+                free(buffer);
+
+                esp_ota_abort(
+                    ota_handle
+                );
+
+                httpd_resp_send_err(
+                    req,
+                    HTTPD_400_BAD_REQUEST,
+                    "Invalid ESP32 firmware image"
+                );
+
+                return ESP_FAIL;
+            }
+        }
+
+
+        /* ----------------------------------------------------
+         * Write firmware chunk
+         * ---------------------------------------------------- */
 
         err = esp_ota_write(
             ota_handle,
@@ -275,7 +530,11 @@ static esp_err_t ota_handler(httpd_req_t *req)
                 esp_err_to_name(err)
             );
 
-            esp_ota_abort(ota_handle);
+            free(buffer);
+
+            esp_ota_abort(
+                ota_handle
+            );
 
             httpd_resp_send_err(
                 req,
@@ -286,16 +545,37 @@ static esp_err_t ota_handler(httpd_req_t *req)
             return err;
         }
 
-        total += received;
+
+        total_received += received;
 
         ESP_LOGI(
             TAG,
-            "Received %d bytes",
-            total
+            "Received: %d / %d bytes",
+            total_received,
+            req->content_len
         );
     }
 
-    err = esp_ota_end(ota_handle);
+
+    /* --------------------------------------------------------
+     * Free upload buffer
+     * -------------------------------------------------------- */
+
+    free(buffer);
+
+    ESP_LOGI(
+        TAG,
+        "Firmware upload complete"
+    );
+
+
+    /* --------------------------------------------------------
+     * Finish OTA
+     * -------------------------------------------------------- */
+
+    err = esp_ota_end(
+        ota_handle
+    );
 
     if (err != ESP_OK) {
 
@@ -313,6 +593,11 @@ static esp_err_t ota_handler(httpd_req_t *req)
 
         return err;
     }
+
+
+    /* --------------------------------------------------------
+     * Set new firmware as boot partition
+     * -------------------------------------------------------- */
 
     err = esp_ota_set_boot_partition(
         update_partition
@@ -335,6 +620,11 @@ static esp_err_t ota_handler(httpd_req_t *req)
         return err;
     }
 
+
+    /* --------------------------------------------------------
+     * OTA successful
+     * -------------------------------------------------------- */
+
     ESP_LOGI(
         TAG,
         "OTA successful!"
@@ -343,16 +633,36 @@ static esp_err_t ota_handler(httpd_req_t *req)
     ESP_LOGI(
         TAG,
         "Total received: %d bytes",
-        total
+        total_received
+    );
+
+
+    /* Send response before reboot */
+
+    httpd_resp_set_type(
+        req,
+        "text/plain"
     );
 
     httpd_resp_sendstr(
         req,
-        "OTA successful. ESP32-S3 will reboot."
+        "OTA successful. Device will reboot..."
     );
 
+
+    /*
+     * Give the TCP stack/browser time to receive
+     * the HTTP response before restarting.
+     */
+
     vTaskDelay(
-        pdMS_TO_TICKS(1000)
+        pdMS_TO_TICKS(1500)
+    );
+
+
+    ESP_LOGI(
+        TAG,
+        "Rebooting into new firmware..."
     );
 
     esp_restart();
@@ -360,12 +670,25 @@ static esp_err_t ota_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+
+/* ============================================================
+ * HTTP Server
+ * ============================================================ */
+
 static void start_webserver(void)
 {
     httpd_config_t config =
         HTTPD_DEFAULT_CONFIG();
 
+    /*
+     * OTA handler uses a heap buffer, but increase the
+     * HTTP server stack for additional safety.
+     */
+
+    config.stack_size = 8192;
+
     config.max_uri_handlers = 8;
+
 
     httpd_handle_t server = NULL;
 
@@ -376,6 +699,11 @@ static void start_webserver(void)
         )
     );
 
+
+    /* --------------------------------------------------------
+     * GET /
+     * -------------------------------------------------------- */
+
     httpd_uri_t index_uri = {
         .uri = "/",
         .method = HTTP_GET,
@@ -383,12 +711,18 @@ static void start_webserver(void)
         .user_ctx = NULL
     };
 
+
+    /* --------------------------------------------------------
+     * POST /update
+     * -------------------------------------------------------- */
+
     httpd_uri_t ota_uri = {
         .uri = "/update",
         .method = HTTP_POST,
         .handler = ota_handler,
         .user_ctx = NULL
     };
+
 
     ESP_ERROR_CHECK(
         httpd_register_uri_handler(
@@ -404,11 +738,17 @@ static void start_webserver(void)
         )
     );
 
+
     ESP_LOGI(
         TAG,
         "OTA web server started"
     );
 }
+
+
+/* ============================================================
+ * Application Entry Point
+ * ============================================================ */
 
 void app_main(void)
 {
@@ -416,6 +756,17 @@ void app_main(void)
         TAG,
         "ESP32-S3 OTA Demo"
     );
+
+    ESP_LOGI(
+        TAG,
+        "ESP-IDF: %s",
+        esp_get_idf_version()
+    );
+
+
+    /* --------------------------------------------------------
+     * Initialize NVS
+     * -------------------------------------------------------- */
 
     esp_err_t ret =
         nvs_flash_init();
@@ -427,18 +778,31 @@ void app_main(void)
             nvs_flash_erase()
         );
 
-        ESP_ERROR_CHECK(
-            nvs_flash_init()
-        );
+        ret = nvs_flash_init();
     }
 
     ESP_ERROR_CHECK(ret);
 
+
+    /* --------------------------------------------------------
+     * Initialize WiFi
+     * -------------------------------------------------------- */
+
     wifi_init();
+
+
+    /*
+     * Give WiFi some time to connect and obtain an IP.
+     */
 
     vTaskDelay(
         pdMS_TO_TICKS(3000)
     );
+
+
+    /* --------------------------------------------------------
+     * Start HTTP OTA server
+     * -------------------------------------------------------- */
 
     start_webserver();
 }
